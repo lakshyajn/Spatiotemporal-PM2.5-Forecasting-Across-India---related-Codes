@@ -309,6 +309,58 @@ def run_tscv_regression(
     }
 
 
+def fit_full_model_predictions(
+    df: pd.DataFrame,
+    feature_cols: list[str],
+    target_col: str,
+    params: dict[str, Any],
+    clip_nonnegative: bool = False,
+) -> pd.Series:
+    """Fit a final model on all target rows and predict every usable input row."""
+    if not feature_cols:
+        raise ValueError("The model has no feature columns.")
+
+    training_df = df[feature_cols + [target_col]].dropna().copy()
+    if len(training_df) < 2:
+        raise ValueError(f"Not enough rows to fit a model for {target_col}.")
+
+    split_at = max(1, int(len(training_df) * 0.8))
+    split_at = min(split_at, len(training_df) - 1)
+    X_train = training_df[feature_cols].to_numpy(dtype=np.float32)
+    y_train = training_df[target_col].to_numpy(dtype=np.float32)
+    validation_model = lgb.train(
+        params,
+        lgb.Dataset(X_train[:split_at], label=y_train[:split_at], feature_name=feature_cols),
+        num_boost_round=3000,
+        valid_sets=[
+            lgb.Dataset(
+                X_train[split_at:],
+                label=y_train[split_at:],
+                feature_name=feature_cols,
+            )
+        ],
+        valid_names=["valid"],
+        callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False)],
+    )
+    best_iteration = validation_model.best_iteration or 3000
+
+    final_model = lgb.train(
+        params,
+        lgb.Dataset(X_train, label=y_train, feature_name=feature_cols),
+        num_boost_round=best_iteration,
+    )
+
+    predictions = pd.Series(np.nan, index=df.index, dtype="float64")
+    usable = df[feature_cols].notna().all(axis=1)
+    if usable.any():
+        X_predict = df.loc[usable, feature_cols].to_numpy(dtype=np.float32)
+        y_pred = final_model.predict(X_predict, num_iteration=best_iteration)
+        if clip_nonnegative:
+            y_pred = np.maximum(0, y_pred)
+        predictions.loc[usable] = y_pred
+    return predictions
+
+
 def print_tscv_results(title: str, result: dict[str, Any]) -> None:
     print(f"\n{'=' * 60}\n{title}")
     print(f"OOF RMSE: {result['oof_rmse']:.4f}")

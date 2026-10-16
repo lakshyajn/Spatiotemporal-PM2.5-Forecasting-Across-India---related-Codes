@@ -101,6 +101,17 @@ python t_plus_1h_model.py --data "dataset_v4.parquet"
 python t_plus_24h_model.py --data "dataset_v4.parquet"
 ```
 
+Running `lag_model.py` also fits the lag-feature model on all available rows
+and writes full-dataset prediction files for both horizons:
+
+- `model_outputs/lightgbm_predictions_t_plus_1h.csv`
+- `model_outputs/lightgbm_predictions_t_plus_24h.csv`
+
+Each file contains `station`, `timestamp`, the actual PM2.5 value at the
+forecast horizon, the PM2.5 value at the prediction timestamp, and the model
+prediction. Rows without enough lag history are retained with an empty
+prediction.
+
 To use another output folder:
 
 ```powershell
